@@ -1,27 +1,47 @@
 import bcrypt from 'bcryptjs'
 import { generateToken } from '../utils/jwt'
+import { RegisterRequest, AuthResponse } from '../types/auth'
+import { AppDataSource } from '../config/database.config'
+import { User } from '../entities/User'
 
-// Simulación de base de datos
-const users: any[] = []
+const userRepository = AppDataSource.getRepository(User)
 
-export const registerUser = async (email: string, password: string) => {
-  const existingUser = users.find(user => user.email === email)
-  if (existingUser) throw new Error('El usuario ya existe')
+export const registerUser = async (data: RegisterRequest): Promise<Omit<User, 'password'>> => {
+    const existingUser = await userRepository.findOne({ where: { email: data.email } })
+    if (existingUser) {
+        throw new Error('El usuario ya existe')
+    }
 
-  const hashedPassword = await bcrypt.hash(password, 10)
-  const user = { id: String(users.length + 1), email, password: hashedPassword }
-  users.push(user)
+    const hashedPassword = await bcrypt.hash(data.password, 10)
+    const user = userRepository.create({
+        email: data.email,
+        password: hashedPassword,
+        name: data.name,
+        role: data.role || 'user'
+    })
 
-  return { id: user.id, email: user.email }
+    await userRepository.save(user)
+
+    const { password, ...userWithoutPassword } = user
+    return userWithoutPassword
 }
 
-export const loginUser = async (email: string, password: string) => {
-  const user = users.find(user => user.email === email)
-  if (!user) throw new Error('Credenciales inválidas')
+export const loginUser = async (email: string, password: string): Promise<AuthResponse> => {
+    const user = await userRepository.findOne({ where: { email } })
+    if (!user) {
+        throw new Error('Credenciales inválidas')
+    }
 
-  const validPassword = await bcrypt.compare(password, user.password)
-  if (!validPassword) throw new Error('Credenciales inválidas')
+    const validPassword = await bcrypt.compare(password, user.password)
+    if (!validPassword) {
+        throw new Error('Credenciales inválidas')
+    }
 
-  const token = generateToken(user.id)
-  return { token, user: { id: user.id, email: user.email } }
+    const token = generateToken(user.id)
+    
+    const { password: _, ...userWithoutPassword } = user
+    return { 
+        token,
+        user: userWithoutPassword
+    }
 }
